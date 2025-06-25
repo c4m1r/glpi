@@ -1,0 +1,63 @@
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "live"'
+      when: always
+    - if: '$CI_COMMIT_TAG == "live"'
+      when: always
+    - when: never
+
+variables:
+  DEPLOY_HOST: glpi.skiftrade.kz
+  DEPLOY_USER: gitlab-runner
+  DEPLOY_DIR: /var/www/glpi
+  BACKUP_PATH: "/var/www/backups/glpi"
+  SSH_KEY_PATH: "$HOME/.ssh/id_rsa"
+  EXCLUDE_CONFIG: "config/config_db.php"
+
+stages:
+  - build
+  - test
+  - backup
+  - deploy
+
+build:
+  stage: build
+  before_script:
+    - git config --global --add safe.directory "$DEPLOY_DIR"
+    - sudo chown -R "$DEPLOY_USER":"$DEPLOY_USER" "$DEPLOY_DIR" || true
+    - cd "$DEPLOY_DIR"
+  script:
+    - composer install --no-interaction --prefer-dist --ignore-platform-req=ext-bcmath --ignore-platform-req=ext-intl --ignore-platform-req=ext-mysqli
+    - tar --exclude="$EXCLUDE_CONFIG" -czf glpi.tar.gz .
+  artifacts:
+    paths:
+      - glpi.tar.gz
+
+# Run the application's test suite
+# Dependencies and translations are built with --build
+# The script cleans up containers automatically
+
+test:
+  stage: test
+  variables:
+    COMPOSE_FILE: ".github/actions/docker-compose-app.yml:.github/actions/docker-compose-services.yml"
+    APPLICATION_ROOT: "$CI_PROJECT_DIR"
+    DB_IMAGE: "githubactions-mariadb:10.11"
+    PHP_IMAGE: "githubactions-php-apache:8.3"
+    UPDATE_FILES_ACL: "true"
+  script:
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
+    - tests/run_tests.sh --build install update phpunit functional cache ldap imap javascript
+
+backup:
+  stage: backup
+  script:
+    - mkdir -p "$BACKUP_PATH"
+    - tar -czf "$BACKUP_PATH/glpi-$(date +%F-%H%M%S).tar.gz" "$DEPLOY_DIR"
+
+deploy:
+  stage: deploy
+  script:
+    - scp -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no glpi.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/tmp/glpi.tar.gz"
+    - ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no "$DEPLOY_USER@$DEPLOY_HOST" "tar -xzf /tmp/glpi.tar.gz -C $DEPLOY_DIR --strip-components=1 && rm /tmp/glpi.tar.gz"
+  needs: [build]
