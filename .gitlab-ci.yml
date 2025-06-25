@@ -4,6 +4,22 @@ stages:
   - backup
   - deploy
 
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "live"'
+      when: always
+    - if: '$CI_COMMIT_TAG == "live"'
+      when: always
+    - when: never  # запрет на запуск в других случаях, никакого бесконечного "Checking pipeline status... "
+
+variables:
+  DEPLOY_HOST: glpi.ПЕРЕИМЕНУЙ.kz
+  DEPLOY_USER: gitlab-runner
+  DEPLOY_DIR: /var/www/glpi
+  BACKUP_PATH: "/var/www/backups/glpi"
+  SSH_KEY_PATH: "$HOME/.ssh/id_rsa"
+  EXCLUDE_CONFIG: "config/config_db.php"
+
 build:
   stage: build
   image: docker:24.0

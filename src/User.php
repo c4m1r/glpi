@@ -1105,7 +1105,7 @@ class User extends CommonDBTM
                 unset($input["password"]);
             } else {
                 if ($input["password"] == $input["password2"]) {
-                    // Check right : my password of user with lesser rights
+                    // Check right: my password of user with lesser rights
                     $password_errors = [];
                     if (
                         isset($input['id'])
@@ -1113,7 +1113,7 @@ class User extends CommonDBTM
                         && (($input['id'] == Session::getLoginUserID())
                         || $this->currentUserHaveMoreRightThan($input['id'])
                         // Permit to change password with token and email
-                        || (($input['password_forget_token'] == $this->fields['password_forget_token'])
+                        || (isset($this->fields['password_forget_token']) && ($input['password_forget_token'] == $this->fields['password_forget_token'])
                            && (strtotime($_SESSION["glpi_currenttime"]) < strtotime($this->fields['password_forget_token_date']))))
                     ) {
                         $input["password"]
@@ -1121,12 +1121,20 @@ class User extends CommonDBTM
 
                         $input['password_last_update'] = $_SESSION["glpi_currenttime"];
                     } else {
-                        Session::addMessagesAfterRedirect(
-                            array_map('htmlescape', $password_errors),
-                            false,
-                            ERROR
-                        );
+                        if (empty($password_errors)) {
+                            $password_errors = [__('An error occurred during password update')];
+                        }
+                        if (PHP_SAPI == 'cli') {
+                            echo implode("\n", $password_errors) . "\n";
+                        } else {
+                            Session::addMessagesAfterRedirect(
+                                array_map('htmlescape', $password_errors),
+                                false,
+                                ERROR
+                            );
+                        }
                         unset($input["password"]);
+                        return false;
                     }
                     unset($input["password2"]);
                 } else {
@@ -4467,7 +4475,7 @@ HTML;
      *
      * @return boolean
      */
-    public static function changeAuthMethod(array $IDs = [], $authtype = 1, $server = -1)
+    public static function changeAuthMethod(array $IDs = [], $authtype = 1, $server = 0)
     {
         /** @var \DBmysql $DB */
         global $DB;
@@ -4490,6 +4498,10 @@ HTML;
                 ],
                 [
                     'id' => $IDs,
+                    'OR' => [
+                        'authtype' => ['<>', $authtype],
+                        'auths_id' => ['<>', $server],
+                    ],
                 ]
             );
             if ($result) {
@@ -4704,7 +4716,7 @@ HTML;
                             'entity'        => Dropdown::getDropdownName("glpi_entities", $data["entities_id"]),
                             'name'          => $link,
                             'serial'        => $data["serial"] ?? '',
-                            'otherserial'   => $data["otherserial"],
+                            'otherserial'   => $data["otherserial"] ?? '',
                             'states'        => !empty($data['states_id'])
                                 ? Dropdown::getDropdownName("glpi_states", $data['states_id'], false, true, false, '')
                                 : '',
