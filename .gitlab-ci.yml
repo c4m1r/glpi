@@ -1,6 +1,7 @@
 stages:
   - build
   - test
+  - backup
   - deploy
 
 build:
@@ -12,6 +13,10 @@ build:
     DOCKER_TLS_CERTDIR: ""
   script:
     - docker build -t glpi .
+    - tar -czf glpi.tar.gz .
+  artifacts:
+    paths:
+      - glpi.tar.gz
 
 # Run the application's test suite
 # Dependencies and translations are built with --build
@@ -32,14 +37,16 @@ test:
   script:
     - tests/run_tests.sh --build install update phpunit functional cache ldap imap javascript
 
+backup:
+  stage: backup
+  script:
+    - mkdir -p /var/www/backups
+    - tar -czf /var/www/backups/glpi-$(date +%F-%H%M%S).tar.gz /var/www/glpi
+
 deploy:
   stage: deploy
-  image: docker:24.0
-  services:
-    - docker:24.0-dind
-  variables:
-    DOCKER_TLS_CERTDIR: ""
   script:
-    - echo "Deploying to production..."
+    - tar -xzf glpi.tar.gz -C /var/www/glpi --strip-components=1
+  needs: [build]
   only:
     - main
