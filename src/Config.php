@@ -555,7 +555,7 @@ class Config extends CommonDBTM
         TemplateRenderer::getInstance()->display('pages/setup/general/dbreplica_setup.html.twig', [
             'config'             => $CFG_GLPI,
             'canedit'            => static::canUpdate(),
-            'primary_dbhost'     => $DB->dbhost,
+            'source_dbhost'      => $DB->dbhost,
             'replica_config'     => $replica_config,
             'replication_status' => $replication_status,
             'replication_delay'  => $replication_delay,
@@ -813,7 +813,7 @@ class Config extends CommonDBTM
 
         $system_info_objs = [];
         foreach ($CFG_GLPI["systeminformations_types"] as $type) {
-            $system_info_objs[] = new $type();
+            $system_info_objs[] = getItemForItemtype($type);
         }
 
         Session::loadLanguage($oldlang);
@@ -938,7 +938,7 @@ class Config extends CommonDBTM
 
         switch (get_class($item)) {
             case Preference::class:
-                return __('Personalization');
+                return self::createTabEntry(text: __('Personalization'), icon: 'ti ti-adjustments');
 
             case User::class:
                 if (
