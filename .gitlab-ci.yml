@@ -1,0 +1,47 @@
+stages:
+  - build
+  - test
+  - deploy
+
+build:
+  stage: build
+  image: docker:24.0
+  services:
+    - docker:24.0-dind
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+  script:
+    - docker build -t glpi .
+
+# Run the application's test suite
+# Dependencies and translations are built with --build
+# The script cleans up containers automatically
+
+test:
+  stage: test
+  image: docker:24.0
+  services:
+    - docker:24.0-dind
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+    COMPOSE_FILE: ".github/actions/docker-compose-app.yml:.github/actions/docker-compose-services.yml"
+    APPLICATION_ROOT: "$CI_PROJECT_DIR"
+    DB_IMAGE: "githubactions-mariadb:10.11"
+    PHP_IMAGE: "githubactions-php-apache:8.3"
+    UPDATE_FILES_ACL: "true"
+  script:
+    - tests/run_tests.sh --build install update phpunit functional cache ldap imap javascript
+  dependencies:
+    - build
+
+deploy:
+  stage: deploy
+  image: docker:24.0
+  services:
+    - docker:24.0-dind
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+  script:
+    - echo "Deploying to production..."
+  only:
+    - main
