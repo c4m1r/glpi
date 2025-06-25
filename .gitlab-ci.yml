@@ -20,32 +20,15 @@ stages:
   - backup
   - deploy
 
-  image: composer:2
-    - composer install --no-interaction --prefer-dist --ignore-platform-req=ext-bcmath --ignore-platform-req=ext-intl --ignore-platform-req=ext-mysqli
-    - tar --exclude="$EXCLUDE_CONFIG" -czf glpi.tar.gz .
-
-    - mkdir -p "$BACKUP_PATH"
-    - tar -czf "$BACKUP_PATH/glpi-$(date +%F-%H%M%S).tar.gz" "$DEPLOY_DIR"
-  image: alpine:latest
-  before_script:
-    - apk add --no-cache openssh
-    - scp -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no glpi.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/tmp/glpi.tar.gz"
-    - ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no "$DEPLOY_USER@$DEPLOY_HOST" "tar -xzf /tmp/glpi.tar.gz -C $DEPLOY_DIR --strip-components=1 && rm /tmp/glpi.tar.gz"
-  DEPLOY_DIR: /var/www/glpi
-  BACKUP_PATH: "/var/www/backups/glpi"
-  SSH_KEY_PATH: "$HOME/.ssh/id_rsa"
-  EXCLUDE_CONFIG: "config/config_db.php"
-
 build:
   stage: build
-  image: docker:24.0
-  services:
-    - docker:24.0-dind
-  variables:
-    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - git config --global --add safe.directory "$DEPLOY_DIR"
+    - sudo chown -R "$DEPLOY_USER":"$DEPLOY_USER" "$DEPLOY_DIR" || true
+    - cd "$DEPLOY_DIR"
   script:
-    - docker build -t glpi .
-    - tar -czf glpi.tar.gz .
+    - composer install --no-interaction --prefer-dist --ignore-platform-req=ext-bcmath --ignore-platform-req=ext-intl --ignore-platform-req=ext-mysqli
+    - tar --exclude="$EXCLUDE_CONFIG" -czf glpi.tar.gz .
   artifacts:
     paths:
       - glpi.tar.gz
@@ -56,29 +39,25 @@ build:
 
 test:
   stage: test
-  image: docker:24.0
-  services:
-    - docker:24.0-dind
   variables:
-    DOCKER_TLS_CERTDIR: ""
     COMPOSE_FILE: ".github/actions/docker-compose-app.yml:.github/actions/docker-compose-services.yml"
     APPLICATION_ROOT: "$CI_PROJECT_DIR"
     DB_IMAGE: "githubactions-mariadb:10.11"
     PHP_IMAGE: "githubactions-php-apache:8.3"
     UPDATE_FILES_ACL: "true"
   script:
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
     - tests/run_tests.sh --build install update phpunit functional cache ldap imap javascript
 
 backup:
   stage: backup
   script:
-    - mkdir -p /var/www/backups
-    - tar -czf /var/www/backups/glpi-$(date +%F-%H%M%S).tar.gz /var/www/glpi
+    - mkdir -p "$BACKUP_PATH"
+    - tar -czf "$BACKUP_PATH/glpi-$(date +%F-%H%M%S).tar.gz" "$DEPLOY_DIR"
 
 deploy:
   stage: deploy
   script:
-    - tar -xzf glpi.tar.gz -C /var/www/glpi --strip-components=1
+    - scp -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no glpi.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/tmp/glpi.tar.gz"
+    - ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no "$DEPLOY_USER@$DEPLOY_HOST" "tar -xzf /tmp/glpi.tar.gz -C $DEPLOY_DIR --strip-components=1 && rm /tmp/glpi.tar.gz"
   needs: [build]
-  only:
-    - main
