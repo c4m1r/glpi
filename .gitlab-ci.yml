@@ -31,8 +31,6 @@ test:
     UPDATE_FILES_ACL: "true"
   script:
     - tests/run_tests.sh --build install update phpunit functional cache ldap imap javascript
-  dependencies:
-    - build
 
 deploy:
   stage: deploy
