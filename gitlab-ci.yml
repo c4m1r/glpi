@@ -1,0 +1,92 @@
+stages:
+  - test
+  - build
+  - backup
+  - deploy
+  
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "live"'
+      when: always
+    - if: '$CI_COMMIT_TAG == "live"'
+      when: always
+    - when: never  # запрет на запуск в других случаях, никакого бесконечного "Checking pipeline status... "
+
+variables:
+  DEPLOY_HOST: glpi.ПЕРЕИМЕНУЙ.kz
+  DEPLOY_USER: gitlab-runner
+  DEPLOY_DIR: /var/www/glpi
+  BACKUP_PATH: "/var/www/backups/glpi"
+  SSH_KEY_PATH: "$HOME/.ssh/id_rsa"
+  EXCLUDE_CONFIG: "config/config_db.php"
+
+test:
+  stage: test
+  image: php:8.1-cli
+  before_script:
+    - apt-get update && apt-get install -y git unzip curl zip libzip-dev libpng-dev libonig-dev libxml2-dev rsync
+    - docker-php-ext-install pdo pdo_mysql zip gd
+    - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+    - composer install
+  script:
+    - vendor/bin/phpcs --standard=PSR12 src/
+    - vendor/bin/phpstan analyse src/
+    - vendor/bin/phpunit --configuration phpunit.xml.dist
+
+# 🛠️ Сборка проекта
+build_glpi:
+  image: php:8.1-cli
+  before_script:
+    - apt-get update && apt-get install -y git unzip curl rsync
+    - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+  script:
+    - composer install --no-dev --optimize-autoloader
+    - php bin/console glpi:build:compile_scss --ansi --no-interaction
+    - php bin/console glpi:cache:clear --no-interaction
+    - mkdir -p dist && rsync -a --exclude=".git" ./ dist/
+  artifacts:
+    paths:
+      - dist
+    expire_in: 1h  # Говорим GitLab удалять через неделю
+  dependencies:
+    - test
+
+# 🧳 Бэкап перед деплоем
+backup_before_deploy:
+  stage: backup
+  script:
+    - echo "Бэкап текущего GLPI на $DEPLOY_HOST..."
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" > "$SSH_KEY_PATH"
+    - chmod 600 "$SSH_KEY_PATH"
+    - ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+    - >
+      ssh -i "$SSH_KEY_PATH" "$DEPLOY_USER@$DEPLOY_HOST" '
+        mkdir -p '"$BACKUP_PATH"' &&
+        tar -czf '"$BACKUP_PATH"'/glpi-backup-$(date +%Y-%m-%d_%H-%M-%S).tar.gz \
+        -C $(dirname "'"$DEPLOY_DIR"'") $(basename "'"$DEPLOY_DIR"'")
+      '
+  dependencies:
+    - build_glpi
+
+# 🚀 Итоговый деплой на production
+# Your configuration file (config/config_db.php) will not be overwritten as long as you keep it outside of deployment scope.
+# Ты правда веришь официальной документации? ⮥	
+deploy_to_production:
+  stage: deploy
+  script:
+    - echo "Деплой на $DEPLOY_HOST"
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" > "$SSH_KEY_PATH"
+    - chmod 600 "$SSH_KEY_PATH"
+    - ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+    - rsync -az --delete \
+        --exclude="$EXCLUDE_CONFIG" \
+        --exclude="files/" \
+        --exclude="marketplace/" \
+        --exclude="plugins/" \
+        --exclude="var/" \
+        dist/ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_DIR"
+  dependencies:
+    - build_glpi
+  when: on_success
